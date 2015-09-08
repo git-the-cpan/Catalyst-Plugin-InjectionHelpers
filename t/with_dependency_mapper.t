@@ -5,6 +5,12 @@ BEGIN {
   eval "use Catalyst 5.90090; 1" || do {
     plan skip_all => "Need a newer version of Catalyst => $@";
   };
+  eval "use Catalyst::Plugin::MapComponentDependencies; 1" || do {
+    plan skip_all => "Need a Catalyst::Plugin::MapComponentDependencies => $@";
+  };
+  eval "use Catalyst::Plugin::MapComponentDependencies::Utils; 1" || do {
+    plan skip_all => "Need a Catalyst::Plugin::MapComponentDependencies::Utils => $@";
+  };
 }
 
 BEGIN {
@@ -24,7 +30,7 @@ BEGIN {
   has bbb => (is=>'ro');
 
   package MyApp::PerRequest;
-  $INC{'MyApp/PerRequest.pm'} = __FILE__;
+  $INC{'MyApp/Singleton.pm'} = __FILE__;
 
   use Moose;
 
@@ -54,17 +60,11 @@ BEGIN {
     $c->res->body('test');
   }
 
-  sub per_session :Local Args(0) {
-    my ($self, $c) = @_;
-    $c->res->body($c->model('PerSession')->request_name);
-  }
-
   package MyApp;
-  use Catalyst qw/
-    InjectionHelpers
-    Session
-    Session::Store::Dummy
-    Session::State::Cookie/;
+
+  use Catalyst 'InjectionHelpers', 'MapComponentDependencies';
+  use Catalyst::Plugin::MapComponentDependencies::Utils 'FromContext';
+
 
   MyApp->inject_components(
     'Model::FromCode' => { from_code => sub { my ($adaptor, $code, $app, %args) = @_;  return bless {a=>1}, 'AAAA' } },
@@ -82,13 +82,10 @@ BEGIN {
       from_class=>'MyApp::PerRequest',
       adaptor=>'PerRequest',
       roles=>['MyApp::Role::Foo'],
-      method=>sub {
-        my ($adaptor, $class, $ctx, %args) = @_;
-        return $class->new(ctx=>$ctx);
-      },
     },
     'Model::Factory' => { from_class=>'MyApp::Singleton', adaptor=>'Factory' },
     'Model::PerRequest' => { from_class=>'MyApp::Singleton', adaptor=>'PerRequest' },
+
   );
 
   MyApp->config(
@@ -96,13 +93,15 @@ BEGIN {
     'Model::SingletonB' => { arg=>300 },
     'Model::Factory' => {aaa=>444},
     'Model::Normal' => { ccc=>200 },
+    'Model::PerRequest2' => {
+      ctx => FromContext,
+    },
   );
 
   MyApp->setup;
 }
 
 use Catalyst::Test 'MyApp';
-use HTTP::Request::Common;
 
 {
   my ($res, $c) = ctx_request( '/example/test' );
